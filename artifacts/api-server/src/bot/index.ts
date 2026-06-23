@@ -69,10 +69,7 @@ export async function startBot(): Promise<void> {
     return;
   }
 
-  logger.info(
-    { tokenLength: token.length, tokenPreview: token.slice(0, 10) + "..." },
-    "Starting Discord bot with token"
-  );
+  logger.info("Starting Discord bot");
 
   const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
