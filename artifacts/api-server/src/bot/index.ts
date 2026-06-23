@@ -1,0 +1,102 @@
+import {
+  Client,
+  GatewayIntentBits,
+  REST,
+  Routes,
+  SlashCommandBuilder,
+  type ChatInputCommandInteraction,
+} from "discord.js";
+import { logger } from "../lib/logger.js";
+import { runTransfer } from "./transfer.js";
+
+const COMMAND_NAME = "emby-transfer";
+
+const transferCommand = new SlashCommandBuilder()
+  .setName(COMMAND_NAME)
+  .setDescription("Transfer Emby favorites and/or watch status between two servers")
+  .addStringOption((o) =>
+    o
+      .setName("source_url")
+      .setDescription("Source Emby server URL (e.g. http://192.168.1.10:8096)")
+      .setRequired(true)
+  )
+  .addStringOption((o) =>
+    o
+      .setName("source_username")
+      .setDescription("Username on the source Emby server")
+      .setRequired(true)
+  )
+  .addStringOption((o) =>
+    o
+      .setName("source_password")
+      .setDescription("Password on the source Emby server")
+      .setRequired(true)
+  )
+  .addStringOption((o) =>
+    o
+      .setName("dest_url")
+      .setDescription("Destination Emby server URL (e.g. http://192.168.1.20:8096)")
+      .setRequired(true)
+  )
+  .addStringOption((o) =>
+    o
+      .setName("dest_username")
+      .setDescription("Username on the destination Emby server")
+      .setRequired(true)
+  )
+  .addStringOption((o) =>
+    o
+      .setName("dest_password")
+      .setDescription("Password on the destination Emby server")
+      .setRequired(true)
+  )
+  .addStringOption((o) =>
+    o
+      .setName("what")
+      .setDescription("What to transfer (default: both)")
+      .setRequired(false)
+      .addChoices(
+        { name: "Both favorites and watch status", value: "both" },
+        { name: "Favorites only", value: "favorites" },
+        { name: "Watch status only", value: "watched" }
+      )
+  );
+
+export async function startBot(): Promise<void> {
+  const token = process.env["DISCORD_TOKEN"];
+  if (!token) {
+    logger.warn("DISCORD_TOKEN not set — Discord bot will not start");
+    return;
+  }
+
+  const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+
+  client.once("ready", async (readyClient) => {
+    logger.info({ tag: readyClient.user.tag }, "Discord bot logged in");
+
+    const rest = new REST().setToken(token);
+    try {
+      await rest.put(Routes.applicationCommands(readyClient.user.id), {
+        body: [transferCommand.toJSON()],
+      });
+      logger.info("Registered global slash commands");
+    } catch (err) {
+      logger.error({ err }, "Failed to register slash commands");
+    }
+  });
+
+  client.on("interactionCreate", async (interaction) => {
+    if (!interaction.isChatInputCommand()) return;
+    if (interaction.commandName !== COMMAND_NAME) return;
+
+    await runTransfer(interaction as ChatInputCommandInteraction).catch((err) => {
+      logger.error({ err }, "Unhandled error in transfer command");
+    });
+  });
+
+  client.on("error", (err) => {
+    logger.error({ err }, "Discord client error");
+  });
+
+  await client.login(token);
+}
