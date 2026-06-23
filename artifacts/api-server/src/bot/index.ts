@@ -16,6 +16,17 @@ const transferCommand = new SlashCommandBuilder()
   .setDescription("Transfer Emby favorites and/or watch status between two servers")
   .addStringOption((o) =>
     o
+      .setName("what")
+      .setDescription("What to transfer")
+      .setRequired(true)
+      .addChoices(
+        { name: "Both favorites and watch status", value: "both" },
+        { name: "Favorites only", value: "favorites" },
+        { name: "Watch status only", value: "watched" }
+      )
+  )
+  .addStringOption((o) =>
+    o
       .setName("source_url")
       .setDescription("Source Emby server URL (e.g. http://192.168.1.10:8096)")
       .setRequired(true)
@@ -49,17 +60,6 @@ const transferCommand = new SlashCommandBuilder()
       .setName("dest_password")
       .setDescription("Password on the destination Emby server")
       .setRequired(true)
-  )
-  .addStringOption((o) =>
-    o
-      .setName("what")
-      .setDescription("What to transfer (default: both)")
-      .setRequired(false)
-      .addChoices(
-        { name: "Both favorites and watch status", value: "both" },
-        { name: "Favorites only", value: "favorites" },
-        { name: "Watch status only", value: "watched" }
-      )
   );
 
 export async function startBot(): Promise<void> {
