@@ -63,11 +63,16 @@ const transferCommand = new SlashCommandBuilder()
   );
 
 export async function startBot(): Promise<void> {
-  const token = process.env["DISCORD_TOKEN"];
+  const token = process.env["DISCORD_TOKEN"]?.trim();
   if (!token) {
     logger.warn("DISCORD_TOKEN not set — Discord bot will not start");
     return;
   }
+
+  logger.info(
+    { tokenLength: token.length, tokenPreview: token.slice(0, 10) + "..." },
+    "Starting Discord bot with token"
+  );
 
   const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
