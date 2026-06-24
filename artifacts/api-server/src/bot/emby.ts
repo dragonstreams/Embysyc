@@ -28,27 +28,58 @@ export interface EmbyItemsResponse {
 const EMBY_AUTH_HEADER = (token: string) =>
   `MediaBrowser Client="EmbyDiscordBot", Device="DiscordBot", DeviceId="emby-discord-bot", Version="1.0.0", Token="${token}"`;
 
+const TIMEOUT_MS = 15_000;
+
+function fetchWithTimeout(
+  url: string,
+  init: RequestInit = {},
+  timeoutMs = TIMEOUT_MS
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...init, signal: controller.signal }).finally(() =>
+    clearTimeout(timer)
+  );
+}
+
 export async function authenticate(
   serverUrl: string,
   username: string,
   password: string
 ): Promise<EmbyAuth> {
   const base = serverUrl.replace(/\/$/, "");
-  const res = await fetch(`${base}/Users/AuthenticateByName`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Emby-Authorization": `MediaBrowser Client="EmbyDiscordBot", Device="DiscordBot", DeviceId="emby-discord-bot", Version="1.0.0"`,
-    },
-    body: JSON.stringify({ Username: username, Pw: password }),
-  });
+
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(
+      `${base}/Users/AuthenticateByName`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Emby-Authorization": `MediaBrowser Client="EmbyDiscordBot", Device="DiscordBot", DeviceId="emby-discord-bot", Version="1.0.0"`,
+        },
+        body: JSON.stringify({ Username: username, Pw: password }),
+      }
+    );
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error(`Connection timed out after ${TIMEOUT_MS / 1000}s — is the server URL reachable?`);
+    }
+    throw new Error(`Network error: ${err instanceof Error ? err.message : String(err)}`);
+  }
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`Authentication failed (${res.status}): ${text || res.statusText}`);
+    throw new Error(
+      `Authentication failed (${res.status}): ${text || res.statusText}`
+    );
   }
 
-  const data = (await res.json()) as { User: { Id: string }; AccessToken: string };
+  const data = (await res.json()) as {
+    User: { Id: string };
+    AccessToken: string;
+  };
   return { userId: data.User.Id, token: data.AccessToken, serverUrl: base };
 }
 
@@ -71,16 +102,22 @@ export async function getItems(
 
   if (options.isFavorite) params.set("Filters", "IsFavorite");
   if (options.isPlayed) params.set("IsPlayed", "true");
-  if (options.types?.length) params.set("IncludeItemTypes", options.types.join(","));
+  if (options.types?.length)
+    params.set("IncludeItemTypes", options.types.join(","));
 
-  const res = await fetch(
-    `${auth.serverUrl}/Users/${auth.userId}/Items?${params}`,
-    {
-      headers: {
-        "X-Emby-Authorization": EMBY_AUTH_HEADER(auth.token),
-      },
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(
+      `${auth.serverUrl}/Users/${auth.userId}/Items?${params}`,
+      { headers: { "X-Emby-Authorization": EMBY_AUTH_HEADER(auth.token) } },
+      30_000 // larger page fetches can take longer
+    );
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error("Timed out fetching items from Emby — the server may be overloaded");
     }
-  );
+    throw new Error(`Network error fetching items: ${err instanceof Error ? err.message : String(err)}`);
+  }
 
   if (!res.ok) throw new Error(`Failed to fetch items (${res.status})`);
   return res.json() as Promise<EmbyItemsResponse>;
@@ -104,6 +141,21 @@ export async function getAllItems(
   return all;
 }
 
+async function embyFetch(url: string, auth: EmbyAuth, init: RequestInit = {}): Promise<Response | null> {
+  try {
+    const res = await fetchWithTimeout(url, {
+      ...init,
+      headers: {
+        "X-Emby-Authorization": EMBY_AUTH_HEADER(auth.token),
+        ...((init.headers as Record<string, string>) ?? {}),
+      },
+    });
+    return res.ok ? res : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function searchItem(
   auth: EmbyAuth,
   name: string,
@@ -117,19 +169,17 @@ export async function searchItem(
     Fields: "ProviderIds,ParentIndexNumber,IndexNumber,SeriesName",
   });
 
-  const res = await fetch(
+  const res = await embyFetch(
     `${auth.serverUrl}/Users/${auth.userId}/Items?${params}`,
-    {
-      headers: { "X-Emby-Authorization": EMBY_AUTH_HEADER(auth.token) },
-    }
+    auth
   );
+  if (!res) return null;
 
-  if (!res.ok) return null;
   const data = (await res.json()) as EmbyItemsResponse;
   return (
-    data.Items.find(
-      (i) => i.Name.toLowerCase() === name.toLowerCase()
-    ) ?? data.Items[0] ?? null
+    data.Items.find((i) => i.Name.toLowerCase() === name.toLowerCase()) ??
+    data.Items[0] ??
+    null
   );
 }
 
@@ -147,16 +197,13 @@ export async function searchEpisode(
     Fields: "ProviderIds,ParentIndexNumber,IndexNumber,SeriesName",
   });
 
-  const res = await fetch(
+  const res = await embyFetch(
     `${auth.serverUrl}/Users/${auth.userId}/Items?${params}`,
-    {
-      headers: { "X-Emby-Authorization": EMBY_AUTH_HEADER(auth.token) },
-    }
+    auth
   );
+  if (!res) return null;
 
-  if (!res.ok) return null;
   const data = (await res.json()) as EmbyItemsResponse;
-
   return (
     data.Items.find(
       (i) =>
@@ -186,7 +233,6 @@ export async function findMatchingItem(
     }
     return null;
   }
-
   return searchItem(destAuth, srcItem.Name, srcItem.Type);
 }
 
@@ -194,26 +240,22 @@ export async function markFavorite(
   auth: EmbyAuth,
   itemId: string
 ): Promise<boolean> {
-  const res = await fetch(
+  const res = await embyFetch(
     `${auth.serverUrl}/Users/${auth.userId}/FavoriteItems/${itemId}`,
-    {
-      method: "POST",
-      headers: { "X-Emby-Authorization": EMBY_AUTH_HEADER(auth.token) },
-    }
+    auth,
+    { method: "POST" }
   );
-  return res.ok;
+  return res !== null;
 }
 
 export async function markPlayed(
   auth: EmbyAuth,
   itemId: string
 ): Promise<boolean> {
-  const res = await fetch(
+  const res = await embyFetch(
     `${auth.serverUrl}/Users/${auth.userId}/PlayedItems/${itemId}`,
-    {
-      method: "POST",
-      headers: { "X-Emby-Authorization": EMBY_AUTH_HEADER(auth.token) },
-    }
+    auth,
+    { method: "POST" }
   );
-  return res.ok;
+  return res !== null;
 }
