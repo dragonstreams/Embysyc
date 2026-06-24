@@ -34,7 +34,7 @@ const transferCommand = new SlashCommandBuilder()
   .addStringOption((o) =>
     o
       .setName("source_username")
-      .setDescription("Username on the source Emby server")
+      .setDescription("Source: local username, or Emby Connect email if using Connect")
       .setRequired(true)
   )
   .addStringOption((o) =>
@@ -52,7 +52,7 @@ const transferCommand = new SlashCommandBuilder()
   .addStringOption((o) =>
     o
       .setName("dest_username")
-      .setDescription("Username on the destination Emby server")
+      .setDescription("Dest: local username, or Emby Connect email if using Connect")
       .setRequired(true)
   )
   .addStringOption((o) =>
@@ -60,6 +60,24 @@ const transferCommand = new SlashCommandBuilder()
       .setName("dest_password")
       .setDescription("Password on the destination Emby server")
       .setRequired(true)
+  )
+  .addStringOption((o) =>
+    o
+      .setName("source_login")
+      .setDescription("How to sign in to the source server (default: local username/password)")
+      .addChoices(
+        { name: "Local username & password", value: "local" },
+        { name: "Emby Connect (email)", value: "connect" }
+      )
+  )
+  .addStringOption((o) =>
+    o
+      .setName("dest_login")
+      .setDescription("How to sign in to the destination server (default: local username/password)")
+      .addChoices(
+        { name: "Local username & password", value: "local" },
+        { name: "Emby Connect (email)", value: "connect" }
+      )
   );
 
 export async function startBot(): Promise<void> {

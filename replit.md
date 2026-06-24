@@ -34,13 +34,15 @@ A Discord bot that transfers a user's favorites and watch history from one remot
 ## Slash Commands
 
 - `/emby-transfer` — Transfer Emby data between two servers
+  - `what` (required, first) — `both` (default), `favorites`, or `watched`
   - `source_url` (required) — Source Emby server URL
-  - `source_username` (required) — Username on source server
+  - `source_username` (required) — Local username, or Emby Connect email if `source_login` is `connect`
   - `source_password` (required) — Password on source server
   - `dest_url` (required) — Destination Emby server URL
-  - `dest_username` (required) — Username on destination server
+  - `dest_username` (required) — Local username, or Emby Connect email if `dest_login` is `connect`
   - `dest_password` (required) — Password on destination server
-  - `what` (optional) — `both` (default), `favorites`, or `watched`
+  - `source_login` (optional) — `local` (default) or `connect` (Emby Connect email login)
+  - `dest_login` (optional) — `local` (default) or `connect` (Emby Connect email login)
 
 ## Architecture decisions
 
@@ -48,12 +50,15 @@ A Discord bot that transfers a user's favorites and watch history from one remot
 - Emby item matching uses name+type for movies/series; series name+season+episode number for episodes.
 - All credentials are passed per-command, never stored — no database needed.
 - Replies are ephemeral (only visible to the user who ran the command) to keep credentials private.
+- Auth supports two methods per server (set via `source_login`/`dest_login`): local `AuthenticateByName`, or Emby Connect (authenticate at connect.emby.media → list linked servers → exchange for a local token on the target server).
+- Transfers run with a concurrency of 8 (worker pool) to stay well within Discord's 15-minute interaction window on large libraries.
 
 ## Gotchas
 
 - Global slash commands can take up to 1 hour to propagate to all Discord servers after first registration.
 - Items not found on the destination simply means that media doesn't exist on that server yet.
 - The bot token must be stored in Replit Secrets as `DISCORD_TOKEN`.
+- Emby Connect login requires Connect to be enabled on the target server and the server to be linked to that Connect account; the server URL is matched by host (falls back to the only linked server if there's just one).
 
 ## User preferences
 

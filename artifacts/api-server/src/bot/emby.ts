@@ -83,6 +83,147 @@ export async function authenticate(
   return { userId: data.User.Id, token: data.AccessToken, serverUrl: base };
 }
 
+const CONNECT_BASE = "https://connect.emby.media";
+const CONNECT_APP = "EmbyDiscordBot/1.0.0";
+
+interface ConnectServer {
+  Url?: string;
+  LocalAddress?: string;
+  AccessKey?: string;
+  Name?: string;
+}
+
+function hostKey(url: string): string {
+  try {
+    const u = new URL(url);
+    return `${u.hostname}:${u.port || (u.protocol === "https:" ? "443" : "80")}`.toLowerCase();
+  } catch {
+    return url.replace(/\/$/, "").toLowerCase();
+  }
+}
+
+/**
+ * Authenticates via Emby Connect (cloud account email/username + password),
+ * then exchanges the Connect token for a local access token on the target server.
+ */
+export async function authenticateConnect(
+  serverUrl: string,
+  emailOrUsername: string,
+  password: string
+): Promise<EmbyAuth> {
+  const base = serverUrl.replace(/\/$/, "");
+
+  // 1. Authenticate against the Emby Connect cloud service.
+  let authRes: Response;
+  try {
+    authRes = await fetchWithTimeout(`${CONNECT_BASE}/service/user/authenticate`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-Application": CONNECT_APP,
+      },
+      body: new URLSearchParams({ nameOrEmail: emailOrUsername, rawpw: password }),
+    });
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error("Timed out reaching Emby Connect (connect.emby.media)");
+    }
+    throw new Error(`Network error reaching Emby Connect: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  if (!authRes.ok) {
+    throw new Error(
+      `Emby Connect sign-in failed (${authRes.status}) — check the email/username and password`
+    );
+  }
+
+  const connect = (await authRes.json()) as {
+    AccessToken?: string;
+    User?: { Id?: string };
+  };
+  const connectUserId = connect.User?.Id;
+  const connectToken = connect.AccessToken;
+  if (!connectUserId || !connectToken) {
+    throw new Error("Unexpected response from Emby Connect during sign-in");
+  }
+
+  // 2. List servers linked to this Connect account.
+  let serversRes: Response;
+  try {
+    serversRes = await fetchWithTimeout(
+      `${CONNECT_BASE}/service/servers?userId=${encodeURIComponent(connectUserId)}`,
+      {
+        headers: {
+          "X-Application": CONNECT_APP,
+          "X-Connect-UserToken": connectToken,
+        },
+      }
+    );
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error("Timed out listing servers from Emby Connect");
+    }
+    throw new Error(`Network error listing Connect servers: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  if (!serversRes.ok) {
+    throw new Error(`Failed to list Emby Connect servers (${serversRes.status})`);
+  }
+
+  const servers = (await serversRes.json()) as ConnectServer[];
+  if (!servers.length) {
+    throw new Error("This Emby Connect account has no linked servers");
+  }
+
+  // 3. Match the requested server by host, or fall back to the only linked one.
+  const wantHost = hostKey(base);
+  const target =
+    servers.find(
+      (s) =>
+        (s.Url && hostKey(s.Url) === wantHost) ||
+        (s.LocalAddress && hostKey(s.LocalAddress) === wantHost)
+    ) ?? (servers.length === 1 ? servers[0] : undefined);
+
+  if (!target) {
+    const names = servers.map((s) => s.Name || s.Url || "unknown").join(", ");
+    throw new Error(
+      `Couldn't match "${base}" to a server on this Connect account. Linked servers: ${names}`
+    );
+  }
+  if (!target.AccessKey) {
+    throw new Error("Matched Connect server is missing an access key");
+  }
+
+  // 4. Exchange the Connect identity for a local server access token.
+  let exchangeRes: Response;
+  try {
+    exchangeRes = await fetchWithTimeout(
+      `${base}/Connect/Exchange?ConnectUserId=${encodeURIComponent(connectUserId)}&format=json`,
+      { headers: { "X-Emby-Token": target.AccessKey } }
+    );
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error(`Timed out exchanging Connect token with ${base}`);
+    }
+    throw new Error(`Network error during Connect exchange: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  if (!exchangeRes.ok) {
+    throw new Error(
+      `Connect token exchange failed (${exchangeRes.status}) — is Emby Connect enabled on this server?`
+    );
+  }
+
+  const exchanged = (await exchangeRes.json()) as {
+    LocalUserId?: string;
+    AccessToken?: string;
+  };
+  if (!exchanged.LocalUserId || !exchanged.AccessToken) {
+    throw new Error("Connect exchange returned no local access token for this server");
+  }
+  return { userId: exchanged.LocalUserId, token: exchanged.AccessToken, serverUrl: base };
+}
+
 export async function getItems(
   auth: EmbyAuth,
   options: {

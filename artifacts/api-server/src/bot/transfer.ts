@@ -2,11 +2,13 @@ import type { ChatInputCommandInteraction, Message } from "discord.js";
 import { EmbedBuilder } from "discord.js";
 import {
   authenticate,
+  authenticateConnect,
   getAllItems,
   findMatchingItem,
   markFavorite,
   markPlayed,
   type EmbyItem,
+  type EmbyAuth,
 } from "./emby.js";
 import { logger } from "../lib/logger.js";
 
@@ -162,7 +164,19 @@ export async function runTransfer(
   const dstUrl = interaction.options.getString("dest_url", true).trim();
   const dstUser = interaction.options.getString("dest_username", true);
   const dstPass = interaction.options.getString("dest_password", true);
+  const srcLogin = interaction.options.getString("source_login") ?? "local";
+  const dstLogin = interaction.options.getString("dest_login") ?? "local";
   const mode = (interaction.options.getString("what") ?? "both") as TransferMode;
+
+  const signIn = (
+    method: string,
+    url: string,
+    user: string,
+    pass: string
+  ): Promise<EmbyAuth> =>
+    method === "connect"
+      ? authenticateConnect(url, user, pass)
+      : authenticate(url, user, pass);
 
   await interaction.deferReply({ ephemeral: true });
 
@@ -193,10 +207,10 @@ export async function runTransfer(
   try {
     // ── Phase 1: Auth ────────────────────────────────────────────────────────
     const [srcAuth, dstAuth] = await Promise.all([
-      authenticate(srcUrl, srcUser, srcPass).catch((e: Error) => {
+      signIn(srcLogin, srcUrl, srcUser, srcPass).catch((e: Error) => {
         throw new Error(`Source server auth failed: ${e.message}`);
       }),
-      authenticate(dstUrl, dstUser, dstPass).catch((e: Error) => {
+      signIn(dstLogin, dstUrl, dstUser, dstPass).catch((e: Error) => {
         throw new Error(`Destination server auth failed: ${e.message}`);
       }),
     ]);
