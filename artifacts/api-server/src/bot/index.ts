@@ -1,6 +1,7 @@
 import {
   Client,
   GatewayIntentBits,
+  PermissionFlagsBits,
   REST,
   Routes,
   SlashCommandBuilder,
@@ -8,8 +9,16 @@ import {
 } from "discord.js";
 import { logger } from "../lib/logger.js";
 import { runTransfer } from "./transfer.js";
+import { runReminderCommand, startReminderScheduler } from "./reminders.js";
 
 const COMMAND_NAME = "emby-transfer";
+const REMINDER_COMMAND_NAME = "reminder";
+
+const reminderCommand = new SlashCommandBuilder()
+  .setName(REMINDER_COMMAND_NAME)
+  .setDescription("Send invoice reminders for invoices due tomorrow now (admin)")
+  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+  .setDMPermission(false);
 
 const transferCommand = new SlashCommandBuilder()
   .setName(COMMAND_NAME)
@@ -115,21 +124,36 @@ export async function startBot(): Promise<void> {
     const rest = new REST().setToken(token);
     try {
       await rest.put(Routes.applicationCommands(readyClient.user.id), {
-        body: [transferCommand.toJSON()],
+        body: [transferCommand.toJSON(), reminderCommand.toJSON()],
       });
       logger.info("Registered global slash commands");
     } catch (err) {
       logger.error({ err }, "Failed to register slash commands");
     }
+
+    startReminderScheduler(readyClient);
   });
 
   client.on("interactionCreate", async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
-    if (interaction.commandName !== COMMAND_NAME) return;
 
-    await runTransfer(interaction as ChatInputCommandInteraction).catch((err) => {
-      logger.error({ err }, "Unhandled error in transfer command");
-    });
+    if (interaction.commandName === COMMAND_NAME) {
+      await runTransfer(interaction as ChatInputCommandInteraction).catch(
+        (err) => {
+          logger.error({ err }, "Unhandled error in transfer command");
+        }
+      );
+      return;
+    }
+
+    if (interaction.commandName === REMINDER_COMMAND_NAME) {
+      await runReminderCommand(
+        interaction as ChatInputCommandInteraction
+      ).catch((err) => {
+        logger.error({ err }, "Unhandled error in reminder command");
+      });
+      return;
+    }
   });
 
   client.on("error", (err) => {
