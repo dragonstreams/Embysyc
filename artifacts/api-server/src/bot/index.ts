@@ -149,6 +149,11 @@ export async function startBot(): Promise<void> {
   client.on("interactionCreate", async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
 
+    logger.info(
+      { command: interaction.commandName, user: interaction.user.tag },
+      "Received slash command interaction"
+    );
+
     if (interaction.commandName === COMMAND_NAME) {
       await runTransfer(interaction as ChatInputCommandInteraction).catch(
         (err) => {
