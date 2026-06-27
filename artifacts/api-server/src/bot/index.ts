@@ -13,7 +13,7 @@ const COMMAND_NAME = "emby-transfer";
 
 const transferCommand = new SlashCommandBuilder()
   .setName(COMMAND_NAME)
-  .setDescription("Transfer Emby favorites and/or watch status between two servers")
+  .setDescription("Transfer Emby/Jellyfin favorites and/or watch status between two servers")
   .addStringOption((o) =>
     o
       .setName("what")
@@ -28,7 +28,7 @@ const transferCommand = new SlashCommandBuilder()
   .addStringOption((o) =>
     o
       .setName("source_url")
-      .setDescription("Source Emby server URL (e.g. http://192.168.1.10:8096)")
+      .setDescription("Source server URL (e.g. http://192.168.1.10:8096)")
       .setRequired(true)
   )
   .addStringOption((o) =>
@@ -40,13 +40,13 @@ const transferCommand = new SlashCommandBuilder()
   .addStringOption((o) =>
     o
       .setName("source_password")
-      .setDescription("Password on the source Emby server")
+      .setDescription("Password on the source server")
       .setRequired(true)
   )
   .addStringOption((o) =>
     o
       .setName("dest_url")
-      .setDescription("Destination Emby server URL (e.g. http://192.168.1.20:8096)")
+      .setDescription("Destination server URL (e.g. http://192.168.1.20:8096)")
       .setRequired(true)
   )
   .addStringOption((o) =>
@@ -58,7 +58,7 @@ const transferCommand = new SlashCommandBuilder()
   .addStringOption((o) =>
     o
       .setName("dest_password")
-      .setDescription("Password on the destination Emby server")
+      .setDescription("Password on the destination server")
       .setRequired(true)
   )
   .addStringOption((o) =>
@@ -77,6 +77,24 @@ const transferCommand = new SlashCommandBuilder()
       .addChoices(
         { name: "Local username & password", value: "local" },
         { name: "Emby Connect (email)", value: "connect" }
+      )
+  )
+  .addStringOption((o) =>
+    o
+      .setName("source_type")
+      .setDescription("Source server software (default: Emby)")
+      .addChoices(
+        { name: "Emby", value: "emby" },
+        { name: "Jellyfin", value: "jellyfin" }
+      )
+  )
+  .addStringOption((o) =>
+    o
+      .setName("dest_type")
+      .setDescription("Destination server software (default: Emby)")
+      .addChoices(
+        { name: "Emby", value: "emby" },
+        { name: "Jellyfin", value: "jellyfin" }
       )
   );
 

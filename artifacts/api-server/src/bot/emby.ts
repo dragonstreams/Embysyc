@@ -1,7 +1,10 @@
+export type ServerType = "emby" | "jellyfin";
+
 export interface EmbyAuth {
   userId: string;
   token: string;
   serverUrl: string;
+  serverType: ServerType;
 }
 
 export interface EmbyItem {
@@ -25,8 +28,18 @@ export interface EmbyItemsResponse {
   TotalRecordCount: number;
 }
 
-const EMBY_AUTH_HEADER = (token: string) =>
-  `MediaBrowser Client="EmbyDiscordBot", Device="DiscordBot", DeviceId="emby-discord-bot", Version="1.0.0", Token="${token}"`;
+const AUTH_VALUE = (token?: string) =>
+  `MediaBrowser Client="EmbyDiscordBot", Device="DiscordBot", DeviceId="emby-discord-bot", Version="1.0.0"${
+    token ? `, Token="${token}"` : ""
+  }`;
+
+// Emby reads credentials from X-Emby-Authorization; Jellyfin uses the standard Authorization header.
+const authHeaderName = (type: ServerType): string =>
+  type === "jellyfin" ? "Authorization" : "X-Emby-Authorization";
+
+const authHeaders = (auth: EmbyAuth): Record<string, string> => ({
+  [authHeaderName(auth.serverType)]: AUTH_VALUE(auth.token),
+});
 
 const TIMEOUT_MS = 15_000;
 
@@ -45,7 +58,8 @@ function fetchWithTimeout(
 export async function authenticate(
   serverUrl: string,
   username: string,
-  password: string
+  password: string,
+  serverType: ServerType = "emby"
 ): Promise<EmbyAuth> {
   const base = serverUrl.replace(/\/$/, "");
 
@@ -57,7 +71,7 @@ export async function authenticate(
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-Emby-Authorization": `MediaBrowser Client="EmbyDiscordBot", Device="DiscordBot", DeviceId="emby-discord-bot", Version="1.0.0"`,
+          [authHeaderName(serverType)]: AUTH_VALUE(),
         },
         body: JSON.stringify({ Username: username, Pw: password }),
       }
@@ -80,7 +94,12 @@ export async function authenticate(
     User: { Id: string };
     AccessToken: string;
   };
-  return { userId: data.User.Id, token: data.AccessToken, serverUrl: base };
+  return {
+    userId: data.User.Id,
+    token: data.AccessToken,
+    serverUrl: base,
+    serverType,
+  };
 }
 
 const CONNECT_BASE = "https://connect.emby.media";
@@ -221,7 +240,12 @@ export async function authenticateConnect(
   if (!exchanged.LocalUserId || !exchanged.AccessToken) {
     throw new Error("Connect exchange returned no local access token for this server");
   }
-  return { userId: exchanged.LocalUserId, token: exchanged.AccessToken, serverUrl: base };
+  return {
+    userId: exchanged.LocalUserId,
+    token: exchanged.AccessToken,
+    serverUrl: base,
+    serverType: "emby",
+  };
 }
 
 export async function getItems(
@@ -250,7 +274,7 @@ export async function getItems(
   try {
     res = await fetchWithTimeout(
       `${auth.serverUrl}/Users/${auth.userId}/Items?${params}`,
-      { headers: { "X-Emby-Authorization": EMBY_AUTH_HEADER(auth.token) } },
+      { headers: authHeaders(auth) },
       30_000 // larger page fetches can take longer
     );
   } catch (err) {
@@ -287,7 +311,7 @@ async function embyFetch(url: string, auth: EmbyAuth, init: RequestInit = {}): P
     const res = await fetchWithTimeout(url, {
       ...init,
       headers: {
-        "X-Emby-Authorization": EMBY_AUTH_HEADER(auth.token),
+        ...authHeaders(auth),
         ...((init.headers as Record<string, string>) ?? {}),
       },
     });

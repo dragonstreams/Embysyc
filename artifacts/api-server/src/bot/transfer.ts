@@ -9,6 +9,7 @@ import {
   markPlayed,
   type EmbyItem,
   type EmbyAuth,
+  type ServerType,
 } from "./emby.js";
 import { logger } from "../lib/logger.js";
 
@@ -111,7 +112,7 @@ class LiveEmbed {
 
     return new EmbedBuilder()
       .setColor(0x5865f2)
-      .setTitle("🔃 Emby Transfer In Progress")
+      .setTitle("🔃 Transfer In Progress")
       .setDescription(lines.join("\n"))
       .setFooter({ text: "Replies are private — only you can see this" });
   }
@@ -166,17 +167,27 @@ export async function runTransfer(
   const dstPass = interaction.options.getString("dest_password", true);
   const srcLogin = interaction.options.getString("source_login") ?? "local";
   const dstLogin = interaction.options.getString("dest_login") ?? "local";
+  const srcType = (interaction.options.getString("source_type") ?? "emby") as ServerType;
+  const dstType = (interaction.options.getString("dest_type") ?? "emby") as ServerType;
   const mode = (interaction.options.getString("what") ?? "both") as TransferMode;
 
   const signIn = (
     method: string,
+    type: ServerType,
     url: string,
     user: string,
     pass: string
-  ): Promise<EmbyAuth> =>
-    method === "connect"
-      ? authenticateConnect(url, user, pass)
-      : authenticate(url, user, pass);
+  ): Promise<EmbyAuth> => {
+    if (method === "connect") {
+      if (type === "jellyfin") {
+        throw new Error(
+          "Emby Connect isn't supported on Jellyfin servers — use local username & password instead."
+        );
+      }
+      return authenticateConnect(url, user, pass);
+    }
+    return authenticate(url, user, pass, type);
+  };
 
   await interaction.deferReply({ ephemeral: true });
 
@@ -207,10 +218,10 @@ export async function runTransfer(
   try {
     // ── Phase 1: Auth ────────────────────────────────────────────────────────
     const [srcAuth, dstAuth] = await Promise.all([
-      signIn(srcLogin, srcUrl, srcUser, srcPass).catch((e: Error) => {
+      signIn(srcLogin, srcType, srcUrl, srcUser, srcPass).catch((e: Error) => {
         throw new Error(`Source server auth failed: ${e.message}`);
       }),
-      signIn(dstLogin, dstUrl, dstUser, dstPass).catch((e: Error) => {
+      signIn(dstLogin, dstType, dstUrl, dstUser, dstPass).catch((e: Error) => {
         throw new Error(`Destination server auth failed: ${e.message}`);
       }),
     ]);
