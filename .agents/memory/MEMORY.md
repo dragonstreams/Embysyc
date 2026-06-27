@@ -1,2 +1,3 @@
 - [Invoice Ninja v5 API](invoice-ninja-api.md) — auth headers, status_id meanings, pagination, and how clients map to Discord users.
 - [.replit env var overrides Secret](env-var-secret-precedence.md) — plaintext [userenv.shared] key shadows a managed Secret of the same name; .replit not directly editable.
+- [Discord autocomplete timing](discord-autocomplete-timing.md) — autocomplete must answer in ~3s; use a short timeout for its API lookup, never the default long backend timeout.

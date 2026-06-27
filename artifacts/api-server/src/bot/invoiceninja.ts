@@ -82,6 +82,102 @@ function fetchWithTimeout(
   );
 }
 
+function getHeaders(config: InvoiceNinjaConfig): Record<string, string> {
+  return {
+    "X-API-TOKEN": config.token,
+    "X-Requested-With": "XMLHttpRequest",
+    Accept: "application/json",
+  };
+}
+
+function errorFor(res: Response): string {
+  if (res.status === 401 || res.status === 403) {
+    return "Invoice Ninja rejected the API token (check INVOICE_NINJA_API_TOKEN)";
+  }
+  return `Invoice Ninja request failed (${res.status})`;
+}
+
+/** A human-readable label for a client (display name, falling back to name/id). */
+export function clientLabel(client: NinjaClient): string {
+  return (
+    client.display_name?.trim() || client.name?.trim() || `Client ${client.id}`
+  );
+}
+
+/** Reads the Discord user ID stored on a client, or undefined if unset. */
+export function clientDiscordId(
+  config: InvoiceNinjaConfig,
+  client: NinjaClient
+): string | undefined {
+  const v = client[config.discordField]?.trim();
+  return v ? v : undefined;
+}
+
+/**
+ * Searches active clients by name/number for the link picker (max 25 results).
+ * `timeoutMs` should be kept short (≈2.5s) when called from Discord autocomplete,
+ * which must respond within Discord's ~3s interaction window.
+ */
+export async function searchClients(
+  config: InvoiceNinjaConfig,
+  query: string,
+  timeoutMs?: number
+): Promise<NinjaClient[]> {
+  const params = new URLSearchParams({
+    per_page: "25",
+    sort: "name|asc",
+    status: "active",
+  });
+  const q = query.trim();
+  if (q) params.set("filter", q);
+
+  const res = await fetchWithTimeout(
+    `${config.baseUrl}/api/v1/clients?${params}`,
+    { headers: getHeaders(config) },
+    timeoutMs
+  );
+  if (!res.ok) throw new Error(errorFor(res));
+  const body = (await res.json()) as { data?: NinjaClient[] };
+  return body.data ?? [];
+}
+
+/** Fetches a single client by id, or null if it doesn't exist. */
+export async function getClient(
+  config: InvoiceNinjaConfig,
+  id: string
+): Promise<NinjaClient | null> {
+  const res = await fetchWithTimeout(
+    `${config.baseUrl}/api/v1/clients/${encodeURIComponent(id)}`,
+    { headers: getHeaders(config) }
+  );
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(errorFor(res));
+  const body = (await res.json()) as { data?: NinjaClient };
+  return body.data ?? null;
+}
+
+/** Sets (or clears, when discordId is null) the client's Discord-ID custom field. */
+export async function setClientDiscordId(
+  config: InvoiceNinjaConfig,
+  id: string,
+  discordId: string | null
+): Promise<NinjaClient> {
+  const res = await fetchWithTimeout(
+    `${config.baseUrl}/api/v1/clients/${encodeURIComponent(id)}`,
+    {
+      method: "PUT",
+      headers: { ...getHeaders(config), "Content-Type": "application/json" },
+      body: JSON.stringify({ [config.discordField]: discordId ?? "" }),
+    }
+  );
+  if (!res.ok) throw new Error(errorFor(res));
+  const body = (await res.json()) as { data?: NinjaClient };
+  if (!body.data) {
+    throw new Error("Invoice Ninja returned no client after update");
+  }
+  return body.data;
+}
+
 /**
  * Fetches all unpaid invoices (paginated), each with its client embedded so the
  * Discord-ID custom field is available without a second request.

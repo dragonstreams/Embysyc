@@ -8,6 +8,7 @@ A Discord bot that transfers a user's favorites and watch history from one remot
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - Required env: `DISCORD_TOKEN` — Discord bot token (from discord.com/developers → Bot page)
+- Optional env: `DISCORD_GUILD_ID` — when set, slash commands register to that one server instantly (otherwise they register globally, which can take up to 1 hour to appear)
 - Required env for reminders: `INVOICE_NINJA_API_TOKEN` — Invoice Ninja API token (Settings → Account Management → API Tokens)
 - Optional reminder env: `INVOICE_NINJA_URL` (default `https://invoicing.co`), `INVOICE_NINJA_DISCORD_FIELD` (which client custom field holds the Discord user ID — `custom_value1`–`custom_value4`, default `custom_value1`), `REMINDER_TZ` (IANA tz, default `UTC`), `REMINDER_HOUR` (0–23, default `9`)
 
@@ -23,7 +24,7 @@ A Discord bot that transfers a user's favorites and watch history from one remot
 - `artifacts/api-server/src/bot/index.ts` — Discord client setup, slash command registration
 - `artifacts/api-server/src/bot/transfer.ts` — `/emby-transfer` command handler and result embed
 - `artifacts/api-server/src/bot/emby.ts` — Emby/Jellyfin API client (auth, fetch items, mark favorites/played). Jellyfin shares Emby's API; the only difference is the auth header (see Architecture decisions).
-- `artifacts/api-server/src/bot/invoiceninja.ts` — Invoice Ninja API client (config from env, paginated unpaid-invoice fetch with client embedded)
+- `artifacts/api-server/src/bot/invoiceninja.ts` — Invoice Ninja API client (config from env, paginated unpaid-invoice fetch with client embedded; client search/get and `setClientDiscordId` write to update the Discord-ID custom field)
 - `artifacts/api-server/src/bot/reminders.ts` — reminder engine (`runReminderJob`), daily scheduler (`startReminderScheduler`), and `/reminder` command handler (`runReminderCommand`)
 - `artifacts/api-server/src/bot/reminderStore.ts` — on-disk dedupe store at `.data/invoice-reminders.json` so restarts don't re-DM
 
@@ -59,11 +60,16 @@ A Discord bot that transfers a user's favorites and watch history from one remot
   - `dest_login` (optional) — `local` (default) or `connect` (Emby Connect email login)
   - `source_type` (optional) — `emby` (default) or `jellyfin`
   - `dest_type` (optional) — `emby` (default) or `jellyfin`
-- `/reminder` — Admin-only. Immediately sends invoice reminders for invoices due tomorrow (same job the daily scheduler runs). Restricted via `setDefaultMemberPermissions(Administrator)` and guild-only. Replies with an ephemeral summary embed.
+- `/reminder` — Admin-only group (restricted via `setDefaultMemberPermissions(Administrator)`, guild-only, ephemeral replies). Subcommands:
+  - `/reminder run` — Immediately sends invoice reminders for invoices due tomorrow (same job the daily scheduler runs; dedupe still applies). Replies with an ephemeral summary embed.
+  - `/reminder link client:<client> user:<@discord>` — Links a Discord user to an Invoice Ninja client by writing the user's ID into the client's configured custom field. `client` has live autocomplete that searches Invoice Ninja by name (a ✓ marks already-linked clients).
+  - `/reminder unlink client:<client>` — Clears the Discord link (custom field) on a client.
 
 ## Architecture decisions
 
 - Bot runs inside the same process as the Express server — no separate worker needed.
+- Slash commands register to a single guild (instant) when `DISCORD_GUILD_ID` is set, otherwise globally (up to 1 hour to propagate). Guild registration is the recommended setup for a single-server bot.
+- Linking a Discord user to a client is done in-Discord via `/reminder link`, which writes the Discord user ID into the client's configured custom field through the Invoice Ninja API (`PUT /api/v1/clients/{id}`). This is still the same mapping the reminder job reads — there's no separate link database. The `client` option uses Discord autocomplete backed by `GET /api/v1/clients?filter=`. Free-typed client text falls back to a name search (exact single match is used; multiple matches ask the admin to pick from autocomplete).
 - Item matching uses name+type for movies/series; series name+season+episode number for episodes.
 - All credentials are passed per-command, never stored — no database needed.
 - Replies are ephemeral (only visible to the user who ran the command) to keep credentials private.

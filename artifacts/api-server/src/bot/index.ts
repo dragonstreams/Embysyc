@@ -9,16 +9,57 @@ import {
 } from "discord.js";
 import { logger } from "../lib/logger.js";
 import { runTransfer } from "./transfer.js";
-import { runReminderCommand, startReminderScheduler } from "./reminders.js";
+import {
+  runReminderCommand,
+  runLinkCommand,
+  runUnlinkCommand,
+  runClientAutocomplete,
+  startReminderScheduler,
+} from "./reminders.js";
 
 const COMMAND_NAME = "emby-transfer";
 const REMINDER_COMMAND_NAME = "reminder";
 
 const reminderCommand = new SlashCommandBuilder()
   .setName(REMINDER_COMMAND_NAME)
-  .setDescription("Send invoice reminders for invoices due tomorrow now (admin)")
+  .setDescription("Invoice reminder tools (admin)")
   .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-  .setDMPermission(false);
+  .setDMPermission(false)
+  .addSubcommand((sub) =>
+    sub
+      .setName("run")
+      .setDescription("Send reminders for invoices due tomorrow right now")
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName("link")
+      .setDescription("Link a Discord user to an Invoice Ninja client")
+      .addStringOption((o) =>
+        o
+          .setName("client")
+          .setDescription("Invoice Ninja client (start typing to search)")
+          .setRequired(true)
+          .setAutocomplete(true)
+      )
+      .addUserOption((o) =>
+        o
+          .setName("user")
+          .setDescription("Discord user who should receive that client's reminders")
+          .setRequired(true)
+      )
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName("unlink")
+      .setDescription("Remove the Discord link from an Invoice Ninja client")
+      .addStringOption((o) =>
+        o
+          .setName("client")
+          .setDescription("Invoice Ninja client (start typing to search)")
+          .setRequired(true)
+          .setAutocomplete(true)
+      )
+  );
 
 const transferCommand = new SlashCommandBuilder()
   .setName(COMMAND_NAME)
@@ -147,6 +188,18 @@ export async function startBot(): Promise<void> {
   });
 
   client.on("interactionCreate", async (interaction) => {
+    if (interaction.isAutocomplete()) {
+      if (
+        interaction.commandName === REMINDER_COMMAND_NAME &&
+        interaction.options.getFocused(true).name === "client"
+      ) {
+        await runClientAutocomplete(interaction).catch((err) => {
+          logger.error({ err }, "Unhandled error in client autocomplete");
+        });
+      }
+      return;
+    }
+
     if (!interaction.isChatInputCommand()) return;
 
     logger.info(
@@ -155,19 +208,22 @@ export async function startBot(): Promise<void> {
     );
 
     if (interaction.commandName === COMMAND_NAME) {
-      await runTransfer(interaction as ChatInputCommandInteraction).catch(
-        (err) => {
-          logger.error({ err }, "Unhandled error in transfer command");
-        }
-      );
+      await runTransfer(interaction).catch((err) => {
+        logger.error({ err }, "Unhandled error in transfer command");
+      });
       return;
     }
 
     if (interaction.commandName === REMINDER_COMMAND_NAME) {
-      await runReminderCommand(
-        interaction as ChatInputCommandInteraction
-      ).catch((err) => {
-        logger.error({ err }, "Unhandled error in reminder command");
+      const sub = interaction.options.getSubcommand();
+      const handler =
+        sub === "link"
+          ? runLinkCommand
+          : sub === "unlink"
+            ? runUnlinkCommand
+            : runReminderCommand;
+      await handler(interaction).catch((err) => {
+        logger.error({ err, sub }, "Unhandled error in reminder command");
       });
       return;
     }
