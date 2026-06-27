@@ -122,11 +122,23 @@ export async function startBot(): Promise<void> {
     logger.info({ tag: readyClient.user.tag }, "Discord bot logged in");
 
     const rest = new REST().setToken(token);
+    const guildId = process.env["DISCORD_GUILD_ID"]?.trim();
+    const body = [transferCommand.toJSON(), reminderCommand.toJSON()];
     try {
-      await rest.put(Routes.applicationCommands(readyClient.user.id), {
-        body: [transferCommand.toJSON(), reminderCommand.toJSON()],
-      });
-      logger.info("Registered global slash commands");
+      if (guildId) {
+        await rest.put(
+          Routes.applicationGuildCommands(readyClient.user.id, guildId),
+          { body }
+        );
+        logger.info({ guildId }, "Registered guild slash commands (instant)");
+      } else {
+        await rest.put(Routes.applicationCommands(readyClient.user.id), {
+          body,
+        });
+        logger.info(
+          "Registered global slash commands (may take up to 1 hour to appear)"
+        );
+      }
     } catch (err) {
       logger.error({ err }, "Failed to register slash commands");
     }
