@@ -22,4 +22,3 @@ timeoutMs = 20000
 [userenv]
 
 [userenv.shared]
-DISCORD_TOKEN = "MTUxNzY4MTU2MjI3ODE2NjY1OA.GYEQAy.HGzVWd-sayGyoHGKY7xKwpT18g9Cj4B_wMGOJo"
