@@ -42,7 +42,7 @@ A Discord bot that transfers a user's favorites and watch history from one remot
 1. A scheduler runs the reminder job on startup, then once a day at `REMINDER_HOUR` in `REMINDER_TZ`
 2. The job fetches all unpaid invoices from Invoice Ninja (with each client embedded)
 3. It keeps invoices that are sent/partial, have a balance > 0, and are due tomorrow (computed in `REMINDER_TZ`)
-4. For each, it reads the Discord user ID from the client's configured custom field (`INVOICE_NINJA_DISCORD_FIELD`) and DMs a reminder embed (with the pay link if present)
+4. For each, it reads the Discord user ID from the client's configured custom field (`INVOICE_NINJA_DISCORD_FIELD`) — but only when the value carries the bot's link marker (`discord:<id>`), so only clients linked via `/reminder link` are reminded — and DMs a reminder embed (with the pay link if present)
 5. Each (due date, invoice) pair is recorded in the on-disk dedupe store so it's never DM'd twice — even across restarts
 6. An admin can run `/reminder` to run the same job on demand (dedupe still applies); it replies with an ephemeral summary (sent / already sent / no Discord ID / failed)
 
@@ -70,6 +70,7 @@ A Discord bot that transfers a user's favorites and watch history from one remot
 - Bot runs inside the same process as the Express server — no separate worker needed.
 - Slash commands register to a single guild (instant) when `DISCORD_GUILD_ID` is set, otherwise globally (up to 1 hour to propagate). Guild registration is the recommended setup for a single-server bot.
 - Linking a Discord user to a client is done in-Discord via `/reminder link`, which writes the Discord user ID into the client's configured custom field through the Invoice Ninja API (`PUT /api/v1/clients/{id}`). This is still the same mapping the reminder job reads — there's no separate link database. The `client` option uses Discord autocomplete backed by `GET /api/v1/clients?filter=`. Free-typed client text falls back to a name search (exact single match is used; multiple matches ask the admin to pick from autocomplete).
+- Only bot-managed links count: `/reminder link` stores the ID with a marker (`discord:<id>`), and the reminder job (and the autocomplete ✓ indicator, and `/reminder unlink`) only recognizes values carrying that marker. A Discord ID typed directly into Invoice Ninja's custom field — without the marker — is intentionally ignored, so reminders only ever go to clients explicitly linked through the bot. Encode/decode lives in `invoiceninja.ts` (`encodeDiscordLink`/`decodeDiscordLink`).
 - Item matching uses name+type for movies/series; series name+season+episode number for episodes.
 - All credentials are passed per-command, never stored — no database needed.
 - Replies are ephemeral (only visible to the user who ran the command) to keep credentials private.
@@ -77,7 +78,7 @@ A Discord bot that transfers a user's favorites and watch history from one remot
 - Jellyfin support: Jellyfin shares Emby's HTTP API for everything used here (`AuthenticateByName`, `Items`, `FavoriteItems`, `PlayedItems`). The only difference is the credentials header — Emby uses `X-Emby-Authorization`, Jellyfin uses the standard `Authorization` header (same `MediaBrowser Client=…, Token=…` value). `EmbyAuth.serverType` (`emby`/`jellyfin`) drives which header name is sent. Source and destination types are independent, so any mix works.
 - Emby Connect is Emby-only — Jellyfin has no equivalent. Selecting `connect` login with a `jellyfin` server type is rejected with a clear error.
 - Transfers run with a concurrency of 8 (worker pool) to stay well within Discord's 15-minute interaction window on large libraries.
-- Invoice reminders map an invoice to a Discord user via a **client custom field** holding the recipient's Discord user ID (which field is configurable; default `custom_value1`). No database needed — the only persisted state is a tiny dedupe JSON file at `.data/invoice-reminders.json` (gitignored), keyed by due date → invoice IDs already reminded.
+- Invoice reminders map an invoice to a Discord user via a **client custom field** holding the recipient's Discord user ID, stored with a `discord:` marker the bot writes (which field is configurable; default `custom_value1`). No database needed — the only persisted state is a tiny dedupe JSON file at `.data/invoice-reminders.json` (gitignored), keyed by due date → invoice IDs already reminded.
 - Invoice Ninja status_id semantics: 1 draft, 2 sent, 3 partial, 4 paid, 5 cancelled. Reminders only target 2/3 with balance > 0. "Due tomorrow" is the invoice `due_date` matching today+1 computed in `REMINDER_TZ` (anchored at noon UTC to avoid DST off-by-one).
 - The scheduler runs the job once on startup (so a same-day restart still catches the window) and then daily at `REMINDER_HOUR`; dedupe makes all re-runs safe. The admin `/reminder` command runs the exact same `runReminderJob`.
 - DMs are sent via `client.users.fetch(id).send(...)` — works when the bot shares a guild with the user; closed DMs are caught and counted as failures, not fatal.
@@ -88,7 +89,7 @@ A Discord bot that transfers a user's favorites and watch history from one remot
 - Items not found on the destination simply means that media doesn't exist on that server yet.
 - The bot token must be stored in Replit Secrets as `DISCORD_TOKEN`.
 - Emby Connect login requires Connect to be enabled on the target server and the server to be linked to that Connect account; the server URL is matched by host (falls back to the only linked server if there's just one).
-- Invoice reminders only fire for clients whose Discord user ID is filled into the configured custom field; clients without it are skipped (counted as "no Discord ID").
+- Invoice reminders only fire for clients linked through `/reminder link` (the stored value must carry the `discord:` marker); clients with no link — or with a bare Discord ID typed directly into the field without the marker — are skipped (counted as "no Discord ID").
 - For a DM to deliver, the recipient must share a Discord server with the bot and allow DMs from server members.
 - The dedupe store lives at `.data/invoice-reminders.json`; deleting it lets reminders for the current day be re-sent.
 

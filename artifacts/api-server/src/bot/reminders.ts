@@ -8,6 +8,7 @@ import { logger } from "../lib/logger.js";
 import {
   clientDiscordId,
   clientLabel,
+  decodeDiscordLink,
   getClient,
   getInvoiceNinjaConfig,
   listUnpaidInvoices,
@@ -102,9 +103,9 @@ function getDiscordId(
   inv: NinjaInvoice,
   config: InvoiceNinjaConfig
 ): string | null {
-  const raw = inv.client?.[config.discordField]?.trim();
-  if (!raw) return null;
-  return /^\d{17,20}$/.test(raw) ? raw : null;
+  // Only honor IDs the bot wrote via /reminder link (carry the link marker);
+  // a Discord ID typed straight into Invoice Ninja is intentionally ignored.
+  return decodeDiscordLink(inv.client?.[config.discordField]) ?? null;
 }
 
 function buildReminderEmbed(inv: NinjaInvoice): EmbedBuilder {
@@ -247,7 +248,7 @@ function summaryEmbed(res: ReminderRunResult): EmbedBuilder {
       { name: "✅ Sent", value: String(res.sent), inline: true },
       { name: "↩️ Already sent", value: String(res.alreadySent), inline: true },
       {
-        name: "❔ No Discord ID",
+        name: "❔ Not linked",
         value: String(res.noDiscordId),
         inline: true,
       },
@@ -256,7 +257,7 @@ function summaryEmbed(res: ReminderRunResult): EmbedBuilder {
 
   if (res.noDiscordId > 0) {
     embed.setFooter({
-      text: "Clients without a Discord ID in the configured custom field were skipped.",
+      text: "Clients not linked via /reminder link were skipped (a Discord ID typed straight into Invoice Ninja doesn't count).",
     });
   }
   if (res.errors.length > 0) {

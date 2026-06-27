@@ -104,13 +104,39 @@ export function clientLabel(client: NinjaClient): string {
   );
 }
 
-/** Reads the Discord user ID stored on a client, or undefined if unset. */
+/**
+ * Marker the bot prefixes onto the Discord ID it writes into the client custom
+ * field. Only values carrying this marker are treated as "linked via the bot",
+ * so a raw Discord ID typed into Invoice Ninja by hand is deliberately ignored.
+ */
+const LINK_PREFIX = "discord:";
+
+/** Encodes a Discord user ID for storage in the client custom field. */
+export function encodeDiscordLink(discordId: string): string {
+  return `${LINK_PREFIX}${discordId}`;
+}
+
+/**
+ * Decodes a stored custom-field value into a Discord user ID, but ONLY when it
+ * carries the bot's link marker and is a valid Discord snowflake. Returns
+ * undefined for unset fields, hand-typed values without the marker, or garbage.
+ */
+export function decodeDiscordLink(raw: string | undefined): string | undefined {
+  const v = raw?.trim();
+  if (!v || !v.startsWith(LINK_PREFIX)) return undefined;
+  const id = v.slice(LINK_PREFIX.length).trim();
+  return /^\d{17,20}$/.test(id) ? id : undefined;
+}
+
+/**
+ * Reads the bot-linked Discord user ID stored on a client, or undefined when
+ * the client was not linked through the bot's `/reminder link` command.
+ */
 export function clientDiscordId(
   config: InvoiceNinjaConfig,
   client: NinjaClient
 ): string | undefined {
-  const v = client[config.discordField]?.trim();
-  return v ? v : undefined;
+  return decodeDiscordLink(client[config.discordField]);
 }
 
 /**
@@ -167,7 +193,9 @@ export async function setClientDiscordId(
     {
       method: "PUT",
       headers: { ...getHeaders(config), "Content-Type": "application/json" },
-      body: JSON.stringify({ [config.discordField]: discordId ?? "" }),
+      body: JSON.stringify({
+        [config.discordField]: discordId ? encodeDiscordLink(discordId) : "",
+      }),
     }
   );
   if (!res.ok) throw new Error(errorFor(res));
