@@ -14,10 +14,27 @@ let cache: Store | null = null;
 
 async function load(): Promise<Store> {
   if (cache) return cache;
+  let raw: string;
   try {
-    const raw = await fs.readFile(FILE, "utf8");
-    cache = JSON.parse(raw) as Store;
+    raw = await fs.readFile(FILE, "utf8");
   } catch {
+    // No file yet — start empty.
+    cache = {};
+    return cache;
+  }
+  try {
+    cache = JSON.parse(raw) as Store;
+  } catch (err) {
+    // Corrupt file: back it up so we don't silently keep failing, then reset.
+    logger.warn(
+      { err },
+      "Invoice reminder store is corrupt — backing up and resetting"
+    );
+    try {
+      await fs.rename(FILE, `${FILE}.corrupt-${Date.now()}`);
+    } catch (renameErr) {
+      logger.warn({ err: renameErr }, "Could not back up corrupt reminder store");
+    }
     cache = {};
   }
   return cache;
@@ -27,7 +44,10 @@ async function save(store: Store): Promise<void> {
   cache = store;
   try {
     await fs.mkdir(path.dirname(FILE), { recursive: true });
-    await fs.writeFile(FILE, JSON.stringify(store), "utf8");
+    // Atomic write: write to a temp file then rename over the target.
+    const tmp = `${FILE}.tmp-${process.pid}`;
+    await fs.writeFile(tmp, JSON.stringify(store), "utf8");
+    await fs.rename(tmp, FILE);
   } catch (err) {
     logger.warn({ err }, "Could not persist invoice reminder store");
   }

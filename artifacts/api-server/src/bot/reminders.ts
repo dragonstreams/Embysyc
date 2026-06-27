@@ -45,8 +45,27 @@ function hourInTz(tz: string): number {
   return parseInt(h, 10) % 24;
 }
 
+let tzValidated: string | null = null;
+
+function isValidTz(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function getTz(): string {
-  return process.env["REMINDER_TZ"]?.trim() || "UTC";
+  if (tzValidated) return tzValidated;
+  const requested = process.env["REMINDER_TZ"]?.trim() || "UTC";
+  if (isValidTz(requested)) {
+    tzValidated = requested;
+  } else {
+    logger.warn({ requested }, "Invalid REMINDER_TZ — falling back to UTC");
+    tzValidated = "UTC";
+  }
+  return tzValidated;
 }
 
 function getReminderHour(): number {
@@ -75,7 +94,7 @@ function getDiscordId(
 ): string | null {
   const raw = inv.client?.[config.discordField]?.trim();
   if (!raw) return null;
-  return /^\d{5,}$/.test(raw) ? raw : null;
+  return /^\d{17,20}$/.test(raw) ? raw : null;
 }
 
 function buildReminderEmbed(inv: NinjaInvoice): EmbedBuilder {

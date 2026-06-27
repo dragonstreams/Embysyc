@@ -1,0 +1,1 @@
+- [Invoice Ninja v5 API](invoice-ninja-api.md) — auth headers, status_id meanings, pagination, and how clients map to Discord users.
